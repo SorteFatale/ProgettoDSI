@@ -14,27 +14,42 @@
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 
-#define posti 10
+#define posti_totale 10
 
+
+esp_now_peer_info_t peerInfo;
 
 // Structure example to receive data
 // Must match the sender structure
 typedef struct struct_message {
   int id;
   int x; //x=1 è apri, x=0 sarà chiudi.
+  uint8_t macSender[6]; //Indirizzo mac del sender
 }struct_message;
+
+typedef struct ack_structure { //Ack message structure
+  int value;
+} ack_structure;
 
 // Create a struct_message called myData
 struct_message myData; 
+ack_structure myAck;
 
 // Create a structure to hold the readings from each board
 struct_message board1;
 struct_message board2;
 
+
+uint8_t macMatrics[1][6] = {
+  {0xac, 0x15, 0x18, 0xe9, 0x8d, 0xf0}
+}; //Abbiamo una matrice 4x6, una riga per ogni scheda 
+
+
+
 SemaphoreHandle_t xMutex;  // Definire il mutex
 
 //Posti del parcheggio
-int posti_parcheggio = posti;
+int posti_parcheggio = posti_totale;
 
 // Create an array with all the structures
 struct_message boardsStruct[2] = {board1, board2}; //Saranno 4 board alla fine
@@ -61,30 +76,103 @@ void Task1(void *myData){ //Task da eseguire all'accesso alla risorsa condivisa,
 
 void checkMessagePosti(struct struct_message* message){
 
+    registrationPeer(message);
+
     if(posti_parcheggio > 0){ //Faccio entrare solo se i posti ci sono
 
         if(message->x == 1){
           
-          Serial.println("Decremento il numero di posti!");
-          posti_parcheggio = posti_parcheggio - 1; 
-          Serial.println(posti_parcheggio);
+          myAck.value=1;
+
+          //Stampa di debug per mac address ricevuto
+          Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+                  message->macSender[0], message->macSender[1], message->macSender[2],
+                  message->macSender[3], message->macSender[4], message->macSender[5]);
+          
+          //Qui dobbiamo inviare un'ack di posto disponibile per aprire la sbarra
+
+          
+          esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
+        
+          reducePlaces(result); //riduciamo i posti
+          
         } 
 
-        //Qui dobbiamo inviare un'ack di posot disponibile per aprire la sbarra
+        
+
 
       } else {
         //Qui invece inviamo il messaggio di non disponibilità di posto
+        myAck.value=0;
+        
+        esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
+
+        if (result == ESP_OK) {
+          Serial.println("Ack=0 sent with success");
+        }
+        else {
+          Serial.println("Error sending the data");
+        }
+
       }
 
-      if(message->x == 0 && posti_parcheggio < posti ){
-          Serial.println("Incremento il numero di posti"); //Incremento posti per uscire
-          posti_parcheggio = posti_parcheggio + 1; 
-          Serial.println(posti_parcheggio);
 
-          //ack alzata sbarra di uscita
+      if(message->x == 0 && posti_parcheggio < posti_totale ){
+         //ack alzata sbarra di uscita
+         myAck.value=1;
+         esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
+         increasePlaces(result);
       } 
 
 }
+
+
+void reducePlaces(esp_err_t result ){
+
+  if (result == ESP_OK) {
+      Serial.println("Ack=1 sent with success");
+      Serial.println("Decremento il numero di posti!");
+      posti_parcheggio = posti_parcheggio - 1; 
+      Serial.println(posti_parcheggio);
+    }
+    else {
+      Serial.println("Error sending the data");
+    }
+
+}
+
+
+void increasePlaces(esp_err_t result){
+  if(result==ESP_OK){
+   Serial.println("Incremento il numero di posti"); //Incremento posti per uscire
+   posti_parcheggio = posti_parcheggio + 1; 
+   Serial.println(posti_parcheggio);
+
+  } else {
+    Serial.println("Error sending the data");
+
+  }
+
+}
+
+
+void registrationPeer(struct struct_message* message){
+      
+
+      memcpy(peerInfo.peer_addr, macMatrics[message->id-1], 6);
+      peerInfo.channel = 0;
+      peerInfo.encrypt = false;
+      
+
+      // Aggiungi il peer se non esiste già
+      if (!esp_now_is_peer_exist(message->macSender)) {
+          if (esp_now_add_peer(&peerInfo) != ESP_OK) {
+              Serial.println("Errore nell'aggiungere il peer");
+              return;
+          }
+      }
+}
+
 
 
 void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) {
@@ -127,6 +215,8 @@ void setup() {
   
   //Set device as a Wi-Fi Station
   WiFi.mode(WIFI_STA);
+  WiFi.STA.begin();
+
 
   //Init ESP-NOW
   if (esp_now_init() != ESP_OK) {
