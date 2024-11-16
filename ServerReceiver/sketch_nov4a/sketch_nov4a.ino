@@ -82,56 +82,62 @@ void checkMessagePosti(struct struct_message* message, int posti_liberi){
 
     registrationPeer(message);
 
-    if(posti_liberi > 0){  //Se ci sono posti liberi...
+    if(message->x == 1){
+      //Se ho un messaggio di ingresso...
         
-        //Richiesta di ingresso del parcheggioi
-        if(message->x == 1){ //Il messaggio è uguale a 1?
+        //Se ci sono posti liberi...
+        if(posti_liberi > 0){
           
-          myAck.value=1; 
 
-          //Stampa di debug per mac address ricevuto
-          Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
-                  message->macSender[0], message->macSender[1], message->macSender[2],
-                  message->macSender[3], message->macSender[4], message->macSender[5]);
-          
-          //Invio ACK=1 al client per farlo entrare.
-          esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
-        
+          esp_err_t result = openBar(message);
           //Aggiorno variabile posti_liberi
+
           posti_liberi = reducePlaces(result, posti_liberi); //riduciamo i posti
 
           //funzione stampaPosti
           stampaPosti(result, &myAck, 0);
           
-        } 
-      
-      } else {
+        } else {
 
-        //Qui invece inviamo il messaggio di non disponibilità di posto
-        myAck.value=0;
-        esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
-        stampaPosti(result, &myAck, 0);
+            notOpenBar(message);
+        }
 
-      }
-
-
-      //Richiesta di uscita dal parcheggio
-      if(message->x == 0 && posti_liberi < posti_totale ){
-         //ACK per alzata sbarra di uscita
-         myAck.value=1;
-
-        //Stampa di debug per mac address ricevuto
-        Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
-                message->macSender[0], message->macSender[1], message->macSender[2],
-                message->macSender[3], message->macSender[4], message->macSender[5]);
-
-
-         esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
-         posti_liberi = increasePlaces(result, posti_liberi);
-         stampaPosti(result, &myAck, 1);
-      } 
+    //Richiesta di uscita dal parcheggio
+    } else if(message->x == 0 && posti_liberi < posti_totale ){
+        //ACK per alzata sbarra di uscita
+    
+        esp_err_t result = openBar(message);
+        posti_liberi = increasePlaces(result, posti_liberi);
+        stampaPosti(result, &myAck, 1);
+    } 
 
 }
+
+
+esp_err_t openBar(struct struct_message* message){
+
+    myAck.value=1; 
+
+    //Stampa di debug per mac address ricevuto
+    Serial.printf("%02x:%02x:%02x:%02x:%02x:%02x\n",
+            message->macSender[0], message->macSender[1], message->macSender[2],
+            message->macSender[3], message->macSender[4], message->macSender[5]);
+          
+    //Invio ACK=1 al client per farlo entrare.
+    esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
+
+    return result;
+}
+
+
+esp_err_t notOpenBar(struct struct_message* message){
+  //Qui invece inviamo il messaggio di non disponibilità di posto
+    myAck.value=0;
+    esp_err_t result = esp_now_send(macMatrics[message->id-1], (uint8_t *) &myAck, sizeof(myAck));
+    stampaPosti(result, &myAck, 0);
+
+    return result;
+} 
 
 
 
@@ -154,35 +160,7 @@ void stampaPosti(esp_err_t result, struct ack_structure* myAck, int sel){
 }
 
 
-/* Si potrebbero eliminare
-void reducePlaces(esp_err_t result, int* posti_liberi){
 
-  if (result == ESP_OK) {
-      Serial.println("Ack=1 sent with success");
-      Serial.println("Decremento il numero di posti!");
-      posti_liberi = posti_liberi - 1; 
-      Serial.println(posti_liberi);
-    }
-    else {
-      Serial.println("Error sending the data");
-    }
-
-}
-
-
-void increasePlaces(esp_err_t result, int posti_liberi){
-  if(result==ESP_OK){
-   Serial.println("Incremento il numero di posti"); //Incremento posti per uscire
-   posti_liberi = posti_liberi + 1; 
-   Serial.println(posti_liberi);
-
-  } else {
-    Serial.println("Error sending the data");
-
-  }
-
-}
-*/
 
 //Registrazione al Peer se non è stato già fatto.
 void registrationPeer(struct struct_message* message){
@@ -228,8 +206,6 @@ void OnDataRecv(const uint8_t * mac_addr, const uint8_t *incomingData, int len) 
 }
 
 
-
-
 void setup() {
   //Initializza Seriale
   Serial.begin(115200);
@@ -250,7 +226,6 @@ void setup() {
   }
 
   //Inizializzazione schermo 
-  
   
   //Ci mettiamo in ascolto
   esp_now_register_recv_cb(esp_now_recv_cb_t(OnDataRecv)); 
