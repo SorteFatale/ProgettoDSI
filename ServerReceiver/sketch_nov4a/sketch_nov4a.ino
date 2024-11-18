@@ -40,10 +40,11 @@ struct_message board3;
 struct_message board4;
 
 //Matrice di indirizzi MAC, utile per inviare gli ACK ai rispettivi sender. E' una 4x6.
-uint8_t macMatrics[3][6] = {
+uint8_t macMatrics[4][6] = {
   {0xac, 0x15, 0x18, 0xe9, 0x8d, 0xf0},
   {0xac, 0x15, 0x18, 0xe9, 0xb4, 0x24},
-  {0xac, 0x15, 0x18, 0xe9, 0x9f, 0x4c}
+  {0xac, 0x15, 0x18, 0xe9, 0x9f, 0x4c}, 
+  {0xac, 0x15, 0x18, 0xe9, 0xdb, 0xc8}
 }; 
 
 
@@ -54,7 +55,7 @@ SemaphoreHandle_t xMutex;
 int posti_liberi = posti_totale;
 
 //Array di strutture di messaggio.
-struct_message boardsStruct[2] = {board1, board2, board3}; //Saranno 4 board alla fine
+struct_message boardsStruct[4] = {board1, board2, board3, board4}; //Saranno 4 board alla fine
 
 
 //oggetto lcd
