@@ -4,6 +4,7 @@
 
 #define PIN_SG90 16 // Pin output servomotore
 #define pinInput 5  // Pin di input per il photo-interrupter
+int x=0; //valore da cambiare in base alla scheda (0: uscita, 1: ingresso)
 
 // Oggetto servomotore
 Servo sg90;
@@ -17,6 +18,9 @@ const char* password = "giuv1911";  // Sostituisci con la password della tua ret
 
 // URL del server centrale
 const char* serverURL = "http://192.168.182.89/parking"; // Sostituisci con l'indirizzo del tuo server
+
+// Timeout massimo per la richiesta HTTP (in millisecondi)
+const unsigned long httpTimeout = 5000;
 
 // Funzione per alzare e abbassare la sbarra
 void activate_parking_bar() {
@@ -33,7 +37,7 @@ void activate_parking_bar() {
   }
 }
 
-// Funzione per inviare i dati al server
+// Funzione per inviare i dati al server con logica di timeout
 void send_data_to_server(int id, int x) {
   HTTPClient http;
 
@@ -44,8 +48,27 @@ void send_data_to_server(int id, int x) {
   // Crea il payload JSON
   String payload = "{\"id\": " + String(id) + ", \"x\": " + String(x) + "}";
 
+  // Avvia il timer per il timeout
+  unsigned long startMillis = millis();
+
   // Invia la richiesta POST
   int httpResponseCode = http.POST(payload);
+
+  // Controlla se la richiesta ha ricevuto una risposta entro il timeout
+  if (millis() - startMillis > httpTimeout) {
+    // Tempo massimo superato
+    Serial.println("Timeout raggiunto! Nessuna risposta dal server.");
+    if(x==0){
+      // Questo for alza la sbarra
+      Serial.println("SBARRA ALZATA");
+      for (int pos = 90; pos >= 0; pos -= 1) {
+        sg90.write(pos);
+        delay(10);
+      }
+    }
+    http.end(); //termino la connesione col server
+    return; // Esci dalla funzione, nessuna risposta valida ricevuta
+  }
 
   // Controlla la risposta del server
   if (httpResponseCode > 0) {
@@ -60,7 +83,8 @@ void send_data_to_server(int id, int x) {
       Serial.println("PARCHEGGIO PIENO!");
     }
   } else {
-    Serial.println("Errore durante la richiesta HTTP");
+    // Errore durante la richiesta HTTP
+    Serial.println("Errore durante la richiesta HTTP: " + String(httpResponseCode));
   }
 
   // Chiude la connessione HTTP
@@ -102,16 +126,15 @@ void loop() {
   int valueState = digitalRead(pinInput); // Legge il valore digitale dal pin del photo-interrupter
   Serial.println(valueState);
 
-  int id = 1; // ID univoco per questa scheda
-  int x = 1;  // Questa scheda invierà sempre 1 perché gestirà solo gli ingressi al parcheggio
+  int id = 2; // ID univoco per questa scheda
 
-  if (valido == 0 && valueState==HIGH) {
+  if (valido == 0 && valueState == HIGH) {
     // Invia i dati al server tramite richiesta HTTP
     send_data_to_server(id, x);
     valido = 1; // Salvo nella variabile di stato il fatto che ho inviato il messaggio
   }
 
-  if (valido == 1 && valueState==LOW) {
+  if (valido == 1 && valueState == LOW) {
     // Ripristino il valore della variabile di stato
     valido = 0;
   }
