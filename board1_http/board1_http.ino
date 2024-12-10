@@ -17,7 +17,7 @@ const char* ssid = "Chihiro Fushimi";          // Sostituisci con il nome della 
 const char* password = "giuv1911";  // Sostituisci con la password della tua rete Wi-Fi
 
 // URL del server centrale
-const char* serverURL = "http://192.168.182.89/parking"; // Sostituisci con l'indirizzo del tuo server
+const char* serverURL = "http://192.168.11.89/parking"; // Sostituisci con l'indirizzo del tuo server
 
 // Timeout massimo per la richiesta HTTP (in millisecondi)
 const unsigned long httpTimeout = 5000;
@@ -126,7 +126,7 @@ void loop() {
   int valueState = digitalRead(pinInput); // Legge il valore digitale dal pin del photo-interrupter
   Serial.println(valueState);
 
-  int id = 2; // ID univoco per questa scheda
+  int id = 4; // ID univoco per questa scheda
 
   if (valido == 0 && valueState == HIGH) {
     // Invia i dati al server tramite richiesta HTTP
