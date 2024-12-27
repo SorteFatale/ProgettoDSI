@@ -2,6 +2,9 @@
 #include <WebServer.h>
 #include <ArduinoJson.h>
 #include <LiquidCrystal_I2C.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "freertos/semphr.h"
 
 // ------ CONFIGURAZIONI E VARIABILI ------
 
@@ -19,6 +22,10 @@ String ledState = "OFF";
 
 // Oggetto LCD
 LiquidCrystal_I2C lcd(0x27, 16, 2);
+
+
+//Semaforo, utile per lo  Strict2PL implementato nella transazione
+SemaphoreHandle_t xMutex;
 
 // Server HTTP su porta 80
 WebServer server(80);
@@ -46,7 +53,61 @@ void aggiornaLCD() {
   }
 }
 
-// Route per gestire richieste POST al parcheggio
+
+void Task1(void *body){
+
+
+  String* bodymes = (String*) body;
+
+
+  // Parsing del payload JSON
+  StaticJsonDocument<200> doc;
+  DeserializationError error = deserializeJson(doc, *(bodymes));
+
+  if (error) {
+    Serial.println("Errore nel parsing del JSON");
+    server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+
+  
+  if(xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE){ //Acquire mutex
+
+    Serial.println("Task sta accedendo alla risorsa condivisa.");
+
+    //int ack = checkMessagePosti(doc);    //facciamo check di ingresso o uscita
+
+
+    int x = doc["x"]; // x=1 per ingresso, x=ù0 per uscita
+
+
+    if (x == 1) { // Ingresso
+      if (posti_liberi > 0) {
+        posti_liberi--;
+        Serial.println("Ingresso consentito. Posti liberi: " + String(posti_liberi));
+      } else {
+        Serial.println("Posti esauriti. Ingresso negato.");
+      }
+    } else if (x == 0) { // Uscita
+      if (posti_liberi < POSTI_TOTALI) {
+        posti_liberi++;
+        Serial.println("Uscita consentita. Posti liberi: " + String(posti_liberi));
+      } else {
+        Serial.println("Nessuna macchina in uscita. Uscita negata.");
+      }
+
+    }
+
+
+    xSemaphoreGive(xMutex); //Release
+  }
+
+  vTaskDelete(NULL); //Eliminazione Task, come se fosse un commit.
+
+}
+
+
+// Route per gestire richieste POST per Ingresso/Uscita
 void handlePost() {
   if (server.hasArg("plain") == false) {
     server.send(400, "application/json", "{\"error\":\"Bad Request\"}");
@@ -56,44 +117,26 @@ void handlePost() {
   String body = server.arg("plain");
   Serial.println("Richiesta ricevuta: " + body);
 
-  // Parsing del payload JSON
-  StaticJsonDocument<200> doc;
-  DeserializationError error = deserializeJson(doc, body);
+  BaseType_t xReturned = xTaskCreate(Task1, "Task1", 20000, (void*) &body, 1, NULL); //Creazione del Task 
 
-  if (error) {
-    Serial.println("Errore nel parsing del JSON");
-    server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-    return;
-  }
-
-  int x = doc["x"]; // x=1 per ingresso, x=0 per uscita
   StaticJsonDocument<100> response;
-  int ack = 0;
+  String responseBody;
+  if( xReturned == pdPASS ){
 
-  if (x == 1) { // Ingresso
-    if (posti_liberi > 0) {
-      posti_liberi--;
-      ack = 1;
-      Serial.println("Ingresso consentito. Posti liberi: " + String(posti_liberi));
-    } else {
-      Serial.println("Posti esauriti. Ingresso negato.");
-    }
-  } else if (x == 0) { // Uscita
-    if (posti_liberi < POSTI_TOTALI) {
-      posti_liberi++;
-      ack = 1;
-      Serial.println("Uscita consentita. Posti liberi: " + String(posti_liberi));
-    } else {
-      Serial.println("Nessuna macchina in uscita. Uscita negata.");
-    }
+    aggiornaLCD();
+  
+    response["ack"] = 1;
+    serializeJson(response, responseBody);
+    
+
+   
+  } else {
+    response["ack"] = 0;
+    serializeJson(response, responseBody);
   }
 
-  aggiornaLCD();
-
-  response["ack"] = ack;
-  String responseBody;
-  serializeJson(response, responseBody);
   server.send(200, "application/json", responseBody);
+
 }
 
 // Route per richieste GET (monitoraggio posti)
@@ -267,10 +310,10 @@ html += "        bottone.onclick = function() {\n";
 html += "            const placesAdmin = postiAdmin.value.trim();\n";
 html += "            if (placesAdmin) {\n";
 html += "                const xhr = new XMLHttpRequest();\n";
-html += "                xhr.open('POST', 'http://192.168.11.89/change_places', true);\n";
+html += "                xhr.open('POST', 'http://192.168.197.89/change_places', true);\n";
 html += "                xhr.setRequestHeader('Content-Type', 'text/plain');\n";
 html += "                xhr.onload = function() {\n";
-html += "                    if (xhr.status === 200) {\n";
+html += "                    if (xhr.status === 201) {\n";
 html += "                        confirmation.style.display = 'block';\n";
 html += "                        postiAdmin.value = '';\n";
 html += "                        setTimeout(() => {\n";
@@ -283,7 +326,7 @@ html += "            }\n";
 html += "        };\n";
 html += "        setInterval(function() {\n";
 html += "            const xhr = new XMLHttpRequest();\n";
-html += "            xhr.open('GET', 'http://192.168.11.89/places', true);\n";
+html += "            xhr.open('GET', 'http://192.168.197.89/places', true);\n";
 html += "            xhr.onload = function() {\n";
 html += "                if (xhr.status === 200) {\n";
 html += "                    postiCount.textContent = xhr.responseText;\n";
@@ -316,25 +359,54 @@ void handleLedOff() {
   handleWebPage();
 }
 
+void Task2(void *body){
+
+  String* bodymes = (String*) body;
+
+
+ 
+
+  if(xSemaphoreTake(xMutex, portMAX_DELAY) == pdTRUE){
+    // Ottieni il valore del campo "posti" 
+    int num_posti = bodymes->toInt(); 
+    posti_liberi = num_posti;
+
+    xSemaphoreGive(xMutex); //Release
+  }
+
+
+  vTaskDelete(NULL); //Eliminazione Task, come se fosse un commit.
+
+}
+
 void handleChangePlaces(){
   //mi prendo il nuovo numero di posti dal payload della risposta
   String body = server.arg("plain");
   Serial.println("Richiesta ricevuta: " + body);
-  posti_liberi = atoi(body.c_str());
-  aggiornaLCD();
-  server.send(200,"","");
+
+
+  BaseType_t xReturned = xTaskCreate(Task2, "Task2", 20000, (void*) &body, 1, NULL); //Creazione del Task 
+
+
+  if( xReturned == pdPASS ){
+    aggiornaLCD();
+    server.send(201,"","");
+  } else {
+    server.send(500, "", "");
+  }
+
 }
 
 // Configura le route del server
 void setupServerRoutes() {
-
+  server.enableCORS();
   server.on("/", HTTP_GET, handleWebPage);       // Web page per il controllo LED
   server.on("/places", HTTP_GET, handlePlaces);  //Ritorna i posti disponibili
   server.on("/led/on", HTTP_GET, handleLedOn);   // Accende il LED
   server.on("/led/off", HTTP_GET, handleLedOff); // Spegne il LED
   server.on("/parking", HTTP_POST, handlePost);  // Gestisce ingressi/uscite parcheggio
   server.on("/status", HTTP_GET, handleGet);     // Stato dei posti liberi
-  server.on("/change_places",HTTP_POST,handleChangePlaces); //Aggiornamento posti da parte dell'admin
+  server.on("/change_places", HTTP_POST,handleChangePlaces); //Aggiornamento posti da parte dell'admin
   server.begin();
   Serial.println("Server HTTP avviato");
 }
@@ -363,6 +435,9 @@ void setup() {
   Serial.println("\nConnesso al Wi-Fi!");
   Serial.print("Indirizzo IP: ");
   Serial.println(WiFi.localIP());
+
+  //Creazione semaforo
+  xMutex = xSemaphoreCreateMutex(); 
 
   
   lcd.clear();
